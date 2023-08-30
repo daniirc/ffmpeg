@@ -369,10 +369,9 @@ av_cold int swr_init(struct SwrContext *s){
     if (s->firstpts_in_samples != AV_NOPTS_VALUE) {
         if (!s->async && s->min_compensation >= FLT_MAX/2)
             s->async = 1;
-        s->firstpts =
-        s->outpts   = s->firstpts_in_samples * s->out_sample_rate;
-    } else
-        s->firstpts = AV_NOPTS_VALUE;
+        s->outpts = s->firstpts_in_samples * s->out_sample_rate;
+    }
+    s->firstpts = AV_NOPTS_VALUE;
 
     if (s->async) {
         if (s->min_compensation >= FLT_MAX/2)
@@ -1036,8 +1035,10 @@ int64_t swr_next_pts(struct SwrContext *s, int64_t pts){
     if(pts == INT64_MIN)
         return s->outpts;
 
-    if (s->firstpts == AV_NOPTS_VALUE)
-        s->outpts = s->firstpts = pts;
+    if (s->firstpts == AV_NOPTS_VALUE) {
+        s->firstpts = pts;
+        if(s->firstpts_in_samples == AV_NOPTS_VALUE) s->outpts = s->firstpts;
+    }
 
     if(s->min_compensation >= FLT_MAX) {
         return (s->outpts = pts - swr_get_delay(s, s->in_sample_rate * (int64_t)s->out_sample_rate));
@@ -1046,7 +1047,8 @@ int64_t swr_next_pts(struct SwrContext *s, int64_t pts){
         double fdelta = delta /(double)(s->in_sample_rate * (int64_t)s->out_sample_rate);
 
         if(fabs(fdelta) > s->min_compensation) {
-            if(s->outpts == s->firstpts || fabs(fdelta) > s->min_hard_compensation){
+            int64_t firstpts = (s->firstpts_in_samples != AV_NOPTS_VALUE) ? s->outpts : s->firstpts;
+            if(s->outpts == firstpts || fabs(fdelta) > s->min_hard_compensation){
                 int ret;
                 if(delta > 0) ret = swr_inject_silence(s,  delta / s->out_sample_rate);
                 else          ret = swr_drop_output   (s, -delta / s-> in_sample_rate);
@@ -1060,6 +1062,7 @@ int64_t swr_next_pts(struct SwrContext *s, int64_t pts){
                 av_log(s, AV_LOG_VERBOSE, "compensating audio timestamp drift:%f compensation:%d in:%d\n", fdelta, comp, duration);
                 swr_set_compensation(s, comp, duration);
             }
+            s->firstpts_in_samples = AV_NOPTS_VALUE;
         }
 
         return s->outpts;
